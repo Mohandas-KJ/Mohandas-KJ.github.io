@@ -52,54 +52,6 @@ let progressPercent = 0;
 let bootSafetyTimeout = null;
 let bootSequenceTimeout = null;
 
-// Video Blob loading state
-let videoBlobURL = null;
-let isVideoLoaded = false;
-let videoLoadPercent = 0;
-let videoLoadFailed = false;
-let progressRow = null;
-
-function loadVideoAsset() {
-  const isMobile = window.innerWidth < 768;
-  const videoSrc = isMobile ? "rb22-mobile.mp4" : "rb22-desktop.mp4";
-
-  fetch(videoSrc)
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      
-      const contentLength = response.headers.get("content-length");
-      if (!contentLength) {
-        const blob = await response.blob();
-        return blob;
-      }
-
-      const total = parseInt(contentLength, 10);
-      let loaded = 0;
-      const reader = response.body.getReader();
-      const chunks = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.length;
-        videoLoadPercent = Math.floor((loaded / total) * 100);
-      }
-
-      return new Blob(chunks, { type: response.headers.get("content-type") || "video/mp4" });
-    })
-    .then((blob) => {
-      videoBlobURL = URL.createObjectURL(blob);
-      isVideoLoaded = true;
-      videoLoadPercent = 100;
-    })
-    .catch((err) => {
-      console.error("Failed to fetch video blob, falling back to direct stream:", err);
-      videoLoadFailed = true;
-      isVideoLoaded = true;
-    });
-}
-
 function runBootSequence() {
   if (logIndex < bootLogs.length) {
     const log = bootLogs[logIndex];
@@ -113,35 +65,16 @@ function runBootSequence() {
 
     logIndex++;
     progressPercent = Math.floor((logIndex / bootLogs.length) * 100);
-    // Show boot logs progress up to 90%
-    const showPercent = Math.min(90, Math.floor(progressPercent * 0.9));
-    if (loaderPercent) loaderPercent.textContent = `${showPercent}%`;
-    if (loaderProgressSpan) loaderProgressSpan.style.width = `${showPercent}%`;
+    if (loaderPercent) loaderPercent.textContent = `${progressPercent}%`;
+    if (loaderProgressSpan) loaderProgressSpan.style.width = `${progressPercent}%`;
 
     const delay = log.type === "success" ? 60 : 110;
     bootSequenceTimeout = window.setTimeout(runBootSequence, delay);
   } else {
-    checkVideoLoadAndFinish();
-  }
-}
-
-function checkVideoLoadAndFinish() {
-  if (bootSafetyTimeout) {
-    window.clearTimeout(bootSafetyTimeout);
-    bootSafetyTimeout = null;
-  }
-
-  if (isVideoLoaded) {
-    if (progressRow) {
-      progressRow.className = "loader-row success";
-      progressRow.textContent = videoLoadFailed 
-        ? "HD F1 telemetry footage stream... ACTIVE" 
-        : "HD F1 telemetry footage download... 100% COMPLETE";
+    if (bootSafetyTimeout) {
+      window.clearTimeout(bootSafetyTimeout);
+      bootSafetyTimeout = null;
     }
-    
-    if (loaderPercent) loaderPercent.textContent = "100%";
-    if (loaderProgressSpan) loaderProgressSpan.style.width = "100%";
-
     if (loaderAccess) loaderAccess.classList.add("visible");
     window.setTimeout(() => {
       if (loader) loader.classList.add("is-hidden");
@@ -152,20 +85,6 @@ function checkVideoLoadAndFinish() {
       // Trigger terminal card typing
       startTerminalTyping();
     }, 1000);
-  } else {
-    if (!progressRow) {
-      progressRow = document.createElement("div");
-      progressRow.className = "loader-row info";
-      if (loaderBody) loaderBody.appendChild(progressRow);
-    }
-    progressRow.textContent = `Downloading HD F1 telemetry footage... ${videoLoadPercent}%`;
-    if (loaderBody) loaderBody.scrollTop = loaderBody.scrollHeight;
-
-    const currentPercent = 90 + Math.floor(videoLoadPercent * 0.09);
-    if (loaderPercent) loaderPercent.textContent = `${currentPercent}%`;
-    if (loaderProgressSpan) loaderProgressSpan.style.width = `${currentPercent}%`;
-
-    window.setTimeout(checkVideoLoadAndFinish, 100);
   }
 }
 
@@ -189,15 +108,11 @@ function enableAutoPlayResume() {
 
 // Start boot sequence on window load
 window.addEventListener("load", () => {
-  loadVideoAsset();
   bootSequenceTimeout = window.setTimeout(runBootSequence, 300);
 });
 
 // Backup safety timer in case load event takes too long
 bootSafetyTimeout = window.setTimeout(() => {
-  console.warn("Loader safety timeout triggered, forcing reveal.");
-  videoLoadFailed = true;
-  isVideoLoaded = true;
   if (bootSequenceTimeout) {
     window.clearTimeout(bootSequenceTimeout);
     bootSequenceTimeout = null;
@@ -209,7 +124,7 @@ bootSafetyTimeout = window.setTimeout(() => {
     enableAutoPlayResume();
     startTerminalTyping();
   }
-}, 25000);
+}, 4000);
 
 if (year) year.textContent = new Date().getFullYear();
 
@@ -843,71 +758,38 @@ function triggerF1Car() {
 window.setInterval(triggerF1Car, 18000);
 window.setTimeout(triggerF1Car, 6000);
 
-// Initialize background video loop with JS crossfade
+// Initialize background video loop with native loop
 function initBackgroundVideo() {
   const container = document.querySelector("#hero-video-bg");
   if (!container) return;
 
   const isMobile = window.innerWidth < 768;
-  const videoSrc = videoBlobURL || (isMobile ? "rb22-mobile.mp4" : "rb22-desktop.mp4");
+  const videoSrc = isMobile ? "rb22-mobile.mp4" : "rb22-desktop.mp4";
 
-  // Create two video elements for crossfading
-  const v1 = document.createElement("video");
-  const v2 = document.createElement("video");
+  // Create a single video element
+  const video = document.createElement("video");
+  video.className = "bg-video-element";
+  video.muted = true;
+  video.loop = true;
+  video.playsInline = true;
+  video.autoplay = true;
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.setAttribute("loop", "");
+  video.setAttribute("autoplay", "");
+  video.style.position = "absolute";
+  video.style.inset = "0";
+  video.style.width = "100%";
+  video.style.height = "100%";
+  video.style.objectFit = "cover";
+  video.style.opacity = "0.45";
+  
+  video.src = videoSrc;
+  video.load();
+  container.appendChild(video);
 
-  [v1, v2].forEach((v, index) => {
-    v.className = "bg-video-element";
-    v.muted = true;
-    v.playsInline = true;
-    v.setAttribute("muted", "");
-    v.setAttribute("playsinline", "");
-    v.style.position = "absolute";
-    v.style.inset = "0";
-    v.style.width = "100%";
-    v.style.height = "100%";
-    v.style.objectFit = "cover";
-    v.style.opacity = index === 0 ? "0.45" : "0";
-    v.style.transition = "opacity 1500ms ease-in-out";
-    
-    v.src = videoSrc;
-    v.load();
-    container.appendChild(v);
-  });
-
-  v1.play().catch(e => console.log("Video autoplay blocked or failed: ", e));
-  activeVideo = v1;
-
-  // Seamless crossfade trigger at 29.5s (before 31s duration end)
-  function triggerCrossfade() {
-    if (isBgAnimationPaused) return;
-
-    const current = activeVideo;
-    const next = (activeVideo === v1) ? v2 : v1;
-
-    next.currentTime = 0;
-    next.play().then(() => {
-      next.style.opacity = "0.45";
-      current.style.opacity = "0";
-      activeVideo = next;
-
-      // Pause the old video once transition fades out completely
-      window.setTimeout(() => {
-        if (activeVideo !== current) {
-          current.pause();
-        }
-      }, 1600);
-    }).catch(err => {
-      console.log("Crossfade play error: ", err);
-    });
-  }
-
-  // Poll active video time to start crossfade near loop duration end
-  crossfadeInterval = window.setInterval(() => {
-    if (isBgAnimationPaused) return;
-    if (activeVideo && activeVideo.currentTime >= 29.4) {
-      triggerCrossfade();
-    }
-  }, 1000);
+  video.play().catch(e => console.log("Video autoplay blocked or failed: ", e));
+  activeVideo = video;
 
   // Bind Pause button events
   const pauseBtn = document.querySelector("#pause-bg-btn");
@@ -919,11 +801,10 @@ function initBackgroundVideo() {
       const btnText = pauseBtn.querySelector(".btn-text");
       
       if (isBgAnimationPaused) {
-        if (v1) v1.pause();
-        if (v2) v2.pause();
+        video.pause();
         if (btnText) btnText.textContent = "PLAY BG ANIMATION";
       } else {
-        if (activeVideo) activeVideo.play().catch(err => console.log("Play error on resume:", err));
+        video.play().catch(err => console.log("Play error on resume:", err));
         if (btnText) btnText.textContent = "PAUSE BG ANIMATION";
       }
     });
